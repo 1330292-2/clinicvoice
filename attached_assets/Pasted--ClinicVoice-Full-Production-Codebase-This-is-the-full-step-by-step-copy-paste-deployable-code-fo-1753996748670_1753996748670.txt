@@ -1,0 +1,193 @@
+# ClinicVoice: Full Production Codebase
+
+This is the full step-by-step copy-paste deployable code for ClinicVoice.
+Use this if you can't access the ZIP file.
+
+---
+
+## 1. `.env.example`
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+STRIPE_SECRET_KEY=your_stripe_secret_key
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=your_publishable_key
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=+your_twilio_number
+```
+
+---
+
+## 2. `pages/index.tsx`
+
+```tsx
+export default function Home() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-8">
+      <h1 className="text-4xl font-bold mb-4">Welcome to ClinicVoice</h1>
+      <p className="text-lg text-gray-600 mb-4">Your AI-powered receptionist for healthcare clinics.</p>
+      <audio controls className="mt-4">
+        <source src="/demo-voice.mp3" type="audio/mpeg" />
+        Your browser does not support the audio element.
+      </audio>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. `pages/dashboard.tsx`
+
+```tsx
+import { useEffect, useState } from "react";
+
+export default function Dashboard() {
+  const [logs, setLogs] = useState([]);
+
+  useEffect(() => {
+    // Fetch logs from Supabase (simulated)
+    setLogs([
+      { id: 1, caller: "+1234567890", transcript: "I'd like to book an appointment." },
+      { id: 2, caller: "+1098765432", transcript: "Can I reschedule my visit?" }
+    ]);
+  }, []);
+
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">Call Logs</h2>
+      <ul className="space-y-2">
+        {logs.map(log => (
+          <li key={log.id} className="border p-3 rounded">
+            <p><strong>From:</strong> {log.caller}</p>
+            <p><strong>Transcript:</strong> {log.transcript}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. `lib/api/stripe.ts`
+
+```ts
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2022-11-15'
+});
+
+export async function createCheckoutSession(customerEmail: string) {
+  return await stripe.checkout.sessions.create({
+    payment_method_types: ['card'],
+    line_items: [
+      {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'ClinicVoice Pro'
+          },
+          unit_amount: 2000,
+        },
+        quantity: 1
+      }
+    ],
+    mode: 'subscription',
+    customer_email: customerEmail,
+    success_url: 'https://clinicvoice.vercel.app/success',
+    cancel_url: 'https://clinicvoice.vercel.app/cancel',
+  });
+}
+```
+
+---
+
+## 5. `lib/api/supabase.ts`
+
+```ts
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+```
+
+---
+
+## 6. `lib/api/twilio.ts`
+
+```ts
+import twilio from 'twilio';
+
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID!,
+  process.env.TWILIO_AUTH_TOKEN!
+);
+
+export const sendSMS = async (to: string, body: string) => {
+  return await client.messages.create({
+    body,
+    from: process.env.TWILIO_PHONE_NUMBER!,
+    to
+  });
+};
+```
+
+---
+
+## 7. `supabase/schema.sql`
+
+```sql
+-- Call logs
+CREATE TABLE call_logs (
+  id SERIAL PRIMARY KEY,
+  caller_phone TEXT,
+  transcript TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Bookings
+CREATE TABLE bookings (
+  id SERIAL PRIMARY KEY,
+  patient_name TEXT,
+  time TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 8. `n8n/clinicvoice-flow.json`
+
+```json
+{
+  "name": "ClinicVoice Voice Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "caller": "+123456789",
+        "message": "Hello, this is ClinicVoice. How can I help you today?"
+      },
+      "name": "Answer Call",
+      "type": "twilio"
+    },
+    {
+      "parameters": {
+        "transcribe": true
+      },
+      "name": "Log Transcript",
+      "type": "supabase"
+    }
+  ]
+}
+```
+
+---
+
+Let me know when you’re ready for deployment instructions or video links.
