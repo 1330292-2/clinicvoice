@@ -1,0 +1,208 @@
+import express from "express";
+import crypto from "crypto";
+import { xml } from "xmlbuilder2";
+import WebSocket, { WebSocketServer } from "ws";
+import fetch from "node-fetch";
+
+const {
+  TWILIO_AUTH_TOKEN,
+  OPENAI_API_KEY,
+  CALCOM_API_KEY,
+  CALCOM_EVENT_TYPE_ID,
+  PUBLIC_BASE_URL,
+} = process.env;
+
+const app = express();
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
+
+// --- (A) Twilio inbound voice webhook -> return TwiML that starts a Media Stream
+app.post("/voice", (req, res) => {
+  // OPTIONAL: verify Twilio signature for security (recommended in prod)
+  // https://www.twilio.com/docs/usage/webhooks/voice-webhooks
+  const twiml = xml({
+    Response: {
+      Start: {
+        Stream: {
+          "@name": "clinicvoice-stream",
+          "@url": `${PUBLIC_BASE_URL.replace(/^http:/, "https:")}/media-stream` // Twilio <Stream> ws relay endpoint
+        }
+      }
+    }
+  }).end({ prettyPrint: true });
+
+  res.type("text/xml").send(twiml);
+});
+
+// --- (B) Upgrade HTTP -> WebSocket endpoint used by Twilio Media Streams
+// Twilio will open a WS to this URL (must be wss in production; Replit provides TLS)
+const server = app.listen(3000, () => {
+  console.log("Server listening on :3000");
+});
+
+// Attach WS server at /media-stream
+const wss = new WebSocketServer({ noServer: true });
+server.on("upgrade", (req, socket, head) => {
+  if (req.url.startsWith("/media-stream")) {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  } else {
+    socket.destroy();
+  }
+});
+
+// --- (C) For each Twilio call WS, connect to OpenAI Realtime (bidirectional audio)
+wss.on("connection", async (twilioWS, req) => {
+  console.log("Twilio media stream connected");
+
+  // Connect to OpenAI Realtime via WebSocket (server-side)
+  // See: https://www.latent.space/p/realtime-api + Twilio blog tutorials
+  const openaiWS = new WebSocket("wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-09-xx", {
+    headers: {
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "OpenAI-Beta": "realtime=v1"
+    }
+  });
+
+  // Define function/tool the model can call to book
+  // We'll handle tool calls via our own protocol messages
+  const toolDefs = [{
+    name: "create_booking",
+    description: "Create a patient appointment via Cal.com",
+    parameters: {
+      type: "object",
+      properties: {
+        patient_name: { type: "string" },
+        patient_email: { type: "string" },
+        start_time_iso: { type: "string", description: "ISO8601 start time in clinic timezone" },
+        notes: { type: "string" }
+      },
+      required: ["patient_name", "start_time_iso"]
+    }
+  }];
+
+  // When OpenAI socket opens, send initial session + system prompt + tools
+  openaiWS.on("open", () => {
+    const session = {
+      type: "session.update",
+      session: {
+        instructions:
+          "You are ClinicVoice, a friendly UK receptionist for a dental/health clinic. " +
+          "Greet callers, gather name/email/reason, confirm preferred time, and book. " +
+          "If you are asked to book: call the tool `create_booking`. " +
+          "Avoid PHI beyond booking details; do not store extra medical info. " +
+          "If tool fails or is unavailable, say you'll text a Calendly link.",
+        modalities: ["text","audio"],
+        voice: "alloy",   // pick a female UK-ish voice your Realtime model supports
+        input_audio_format: { type: "g711_alaw", sample_rate_hz: 8000 }, // Twilio audio
+        output_audio_format:{ type: "g711_alaw", sample_rate_hz: 8000 },
+        tools: toolDefs,
+      }
+    };
+    openaiWS.send(JSON.stringify(session));
+  });
+
+  // Pipe audio from Twilio -> OpenAI
+  twilioWS.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg.toString());
+      if (data.event === "media") {
+        // Twilio sends base64 audio chunks (mu-law/a-law). Forward to OpenAI
+        openaiWS.send(JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: data.media.payload, // base64
+        }));
+      } else if (data.event === "start") {
+        // Start new turn
+        openaiWS.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+        openaiWS.send(JSON.stringify({ type: "response.create" }));
+      } else if (data.event === "mark") {
+        // ignored
+      } else if (data.event === "stop") {
+        openaiWS.close();
+        twilioWS.close();
+      }
+    } catch (e) {
+      console.error("Twilio WS parse error:", e);
+    }
+  });
+
+  // Pipe audio from OpenAI -> Twilio
+  openaiWS.on("message", async (raw) => {
+    const evt = JSON.parse(raw.toString());
+
+    // The exact event types can vary; look for audio deltas/frames
+    if (evt.type === "output_audio.delta" && evt.audio) {
+      // Send audio to Twilio in a <Stream> WS "media" frame
+      const frame = {
+        event: "media",
+        media: { payload: evt.audio } // base64 g711 alaw
+      };
+      twilioWS.send(JSON.stringify(frame));
+    }
+
+    // Tool call from the model
+    if (evt.type === "tool.call" && evt.name === "create_booking") {
+      const args = evt.arguments || {};
+      try {
+        const booking = await createCalComBooking(args);
+        openaiWS.send(JSON.stringify({
+          type: "tool.result",
+          tool_call_id: evt.id,
+          result: { ok: true, booking }
+        }));
+      } catch (err) {
+        // Fallback: instruct model to send Calendly link via SMS if you prefer that flow
+        openaiWS.send(JSON.stringify({
+          type: "tool.result",
+          tool_call_id: evt.id,
+          result: { ok: false, error: err.message || "Booking failed" }
+        }));
+      }
+      // Continue conversation
+      openaiWS.send(JSON.stringify({ type: "response.create" }));
+    }
+  });
+
+  openaiWS.on("close", () => {
+    console.log("OpenAI WS closed");
+    // Tell Twilio stream to stop
+    twilioWS.send(JSON.stringify({ event: "stop" }));
+    twilioWS.close();
+  });
+
+  openaiWS.on("error", (e) => console.error("OpenAI WS error", e));
+  twilioWS.on("error", (e) => console.error("Twilio WS error", e));
+});
+
+// --- (D) Booking tool implementation (Cal.com). If you must use Calendly, see notes below.
+async function createCalComBooking({ patient_name, patient_email, start_time_iso, notes }) {
+  if (!process.env.CALCOM_API_KEY) {
+    throw new Error("CALCOM_API_KEY not configured");
+  }
+  const body = {
+    eventTypeId: Number(process.env.CALCOM_EVENT_TYPE_ID),
+    start: start_time_iso,
+    attendees: [{
+      name: patient_name,
+      email: patient_email || "no-email@placeholder.local"
+    }],
+    metadata: { notes: notes || "" }
+  };
+
+  const resp = await fetch("https://api.cal.com/v2/bookings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.CALCOM_API_KEY}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Cal.com booking failed: ${resp.status} ${text}`);
+  }
+  return await resp.json();
+}
+
+export default app;
