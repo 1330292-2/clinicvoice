@@ -3,28 +3,60 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 
 // Encryption utilities for API keys
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32);
+// CRITICAL: Must use deterministic 32-byte key from environment
+const getEncryptionKey = (): Buffer => {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) {
+    console.error('CRITICAL: ENCRYPTION_KEY environment variable not set!');
+    console.error('Generate one with: openssl rand -hex 32');
+    throw new Error('ENCRYPTION_KEY must be set in environment variables');
+  }
+  // Convert hex string to 32-byte buffer
+  const keyBuffer = Buffer.from(key, 'hex');
+  if (keyBuffer.length !== 32) {
+    throw new Error('ENCRYPTION_KEY must be exactly 32 bytes (64 hex characters)');
+  }
+  return keyBuffer;
+};
+
 const IV_LENGTH = 16;
+const ALGORITHM = 'aes-256-cbc';
 
 export class EncryptionService {
   static encrypt(text: string): string {
     if (!text) return '';
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipher('aes-256-cbc', ENCRYPTION_KEY);
-    let encrypted = cipher.update(text, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    return iv.toString('hex') + ':' + encrypted;
+    try {
+      const key = getEncryptionKey();
+      const iv = crypto.randomBytes(IV_LENGTH);
+      const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+      let encrypted = cipher.update(text, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      // Store IV with encrypted data (IV:encrypted)
+      return iv.toString('hex') + ':' + encrypted;
+    } catch (error) {
+      console.error('Encryption failed:', error);
+      throw new Error('Failed to encrypt sensitive data');
+    }
   }
 
   static decrypt(encryptedText: string): string {
     if (!encryptedText) return '';
-    const textParts = encryptedText.split(':');
-    const iv = Buffer.from(textParts.shift()!, 'hex');
-    const encrypted = textParts.join(':');
-    const decipher = crypto.createDecipher('aes-256-cbc', ENCRYPTION_KEY);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    try {
+      const key = getEncryptionKey();
+      const textParts = encryptedText.split(':');
+      if (textParts.length !== 2) {
+        throw new Error('Invalid encrypted format');
+      }
+      const iv = Buffer.from(textParts[0], 'hex');
+      const encrypted = textParts[1];
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (error) {
+      console.error('Decryption failed:', error);
+      throw new Error('Failed to decrypt sensitive data - encryption key may have changed');
+    }
   }
 }
 

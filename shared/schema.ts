@@ -41,6 +41,17 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// SECURITY: Two-Factor Authentication table (HIPAA requirement)
+export const totpSecrets = pgTable("totp_secrets", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(), // Encrypted TOTP secret
+  enabled: boolean("enabled").notNull().default(false),
+  backupCodes: jsonb("backup_codes"), // Encrypted recovery codes (array)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  verifiedAt: timestamp("verified_at"),
+});
+
 // Clinics table
 export const clinics = pgTable("clinics", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -96,7 +107,12 @@ export const callLogs: any = pgTable("call_logs", {
   exportedToFile: boolean("exported_to_file").notNull().default(false),
   fileExportPath: text("file_export_path"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Performance indexes for common queries
+  index("idx_call_logs_clinic_created").on(table.clinicId, table.createdAt),
+  index("idx_call_logs_clinic_id").on(table.clinicId),
+  index("idx_call_logs_created_at").on(table.createdAt),
+]);
 
 // Appointments table
 export const appointments: any = pgTable("appointments", {
@@ -118,7 +134,13 @@ export const appointments: any = pgTable("appointments", {
   fileExportPath: text("file_export_path"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Performance indexes for common queries
+  index("idx_appointments_clinic_date").on(table.clinicId, table.appointmentDate),
+  index("idx_appointments_clinic_id").on(table.clinicId),
+  index("idx_appointments_date").on(table.appointmentDate),
+  index("idx_appointments_status").on(table.status),
+]);
 
 // AI configurations table
 export const aiConfigurations = pgTable("ai_configurations", {
@@ -159,34 +181,67 @@ export const apiConfigurations = pgTable("api_configurations", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Schema exports
+// SECURITY: Schema exports with input validation to prevent DoS attacks
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  email: z.string().email().max(255),
+  firstName: z.string().max(100).optional(),
+  lastName: z.string().max(100).optional(),
+  profileImageUrl: z.string().url().max(500).optional(),
 });
 
 export const insertClinicSchema = createInsertSchema(clinics).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  name: z.string().min(1).max(200),
+  phoneNumber: z.string().max(20).optional(),
+  address: z.string().max(500).optional(),
+  email: z.string().email().max(255).optional(),
+  website: z.string().url().max(500).optional(),
+  description: z.string().max(2000).optional(),
+  logo: z.string().url().max(500).optional(),
 });
 
 export const insertCallLogSchema = createInsertSchema(callLogs).omit({
   id: true,
   createdAt: true,
+}).extend({
+  callerPhone: z.string().max(20),
+  toNumber: z.string().max(20).optional(),
+  transcript: z.string().max(50000).optional(), // Limit transcript to 50KB
+  summary: z.string().max(5000).optional(),
+  recording: z.string().url().max(500).optional(),
 });
 
 export const insertAppointmentSchema = createInsertSchema(appointments).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  patientName: z.string().min(1).max(200),
+  patientPhone: z.string().max(20).optional(),
+  patientEmail: z.string().email().max(255).optional(),
+  appointmentType: z.string().max(100).optional(),
+  notes: z.string().max(5000).optional(),
+  cancelReason: z.string().max(1000).optional(),
 });
 
 export const insertAiConfigurationSchema = createInsertSchema(aiConfigurations).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  systemPrompt: z.string().max(10000).optional(),
+  greeting: z.string().max(500).optional(),
+  goodbyeMessage: z.string().max(500).optional(),
+  voiceId: z.string().max(100).optional(),
+  voiceName: z.string().max(100).optional(),
+  personalityTraits: z.string().max(500).optional(),
 });
 
 export const insertApiConfigurationSchema = createInsertSchema(apiConfigurations).omit({

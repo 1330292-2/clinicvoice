@@ -4,7 +4,8 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { FileExportService } from "./services/fileExport";
 import { db } from "./db";
-import { clinics, users, callLogs, appointments, platformAnalytics, apiConfigurations, clinicMembers, teamInvitations, usageTracking, auditLogs, dataRetentionPolicies, apiKeys, webhooks, webhookDeliveries, apiUsage, rateLimitBuckets, cohortAnalysis, conversionEvents, callOutcomeMetrics, analyticsReports, reportDeliveries, performanceBenchmarks } from "@shared/schema";
+import { clinics, users, callLogs, appointments, platformAnalytics, apiConfigurations, aiConfigurations, clinicMembers, teamInvitations, usageTracking, auditLogs, dataRetentionPolicies, apiKeys, webhooks, webhookDeliveries, apiUsage, rateLimitBuckets, cohortAnalysis, conversionEvents, callOutcomeMetrics, analyticsReports, reportDeliveries, performanceBenchmarks } from "@shared/schema";
+import DOMPurify from 'isomorphic-dompurify';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { eq, count, sum, avg, desc, gte, lte, and, lt, sql } from "drizzle-orm";
@@ -24,6 +25,7 @@ import {
 import { z } from "zod";
 import apiRoutes from "./routes/api";
 import publicApiRoutes from "./routes/public-api";
+import twoFactorRoutes from "./routes/2fa";
 import passport from "passport";
 import { create } from "xmlbuilder2";
 import WebSocket, { WebSocketServer } from "ws";
@@ -31,6 +33,19 @@ import WebSocket, { WebSocketServer } from "ws";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
+
+  // SECURITY FIX: CSRF token generation endpoint
+  app.get('/api/csrf-token', (req: any, res) => {
+    const token = crypto.randomBytes(32).toString('hex');
+    if (!req.session) {
+      req.session = {};
+    }
+    (req.session as any).csrfToken = token;
+    res.json({ csrfToken: token });
+  });
+
+  // SECURITY: 2FA routes (HIPAA compliance)
+  app.use('/api/2fa', isAuthenticated, twoFactorRoutes);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -44,13 +59,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin-only middleware
+  // SECURITY FIX: Admin-only middleware with database-only verification
   const isAdmin = async (req: any, res: any, next: any) => {
     try {
       const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
       
-      if (!user || user.role !== 'admin') {
+      // CRITICAL: Only trust database, not JWT claims for role verification
+      const [user] = await db.select()
+        .from(users)
+        .where(and(
+          eq(users.id, userId),
+          eq(users.role, 'admin')
+        ))
+        .for('update'); // Row-level lock to prevent race conditions
+      
+      if (!user) {
+        // Log unauthorized access attempt
+        await AuditService.log({
+          action: 'unauthorized_admin_access',
+          userId,
+          metadata: { path: req.path },
+          severity: 'high'
+        });
         return res.status(403).json({ message: "Admin access required" });
       }
       
@@ -323,7 +353,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Clinic not found" });
       }
 
-      const callLogData = insertCallLogSchema.parse({ ...req.body, clinicId: clinic.id });
+      // SECURITY FIX: Sanitize all text fields to prevent XSS
+      const sanitizedBody = {
+        ...req.body,
+        transcript: req.body.transcript ? DOMPurify.sanitize(req.body.transcript) : undefined,
+        summary: req.body.summary ? DOMPurify.sanitize(req.body.summary) : undefined,
+        callerPhone: req.body.callerPhone ? req.body.callerPhone.replace(/[^\d+\-\(\)\s]/g, '') : undefined,
+        clinicId: clinic.id
+      };
+
+      const callLogData = insertCallLogSchema.parse(sanitizedBody);
       const callLog = await storage.createCallLog(callLogData);
       res.json(callLog);
     } catch (error) {
@@ -400,7 +439,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Clinic not found" });
       }
 
-      const appointmentData = insertAppointmentSchema.parse({ ...req.body, clinicId: clinic.id });
+      // SECURITY FIX: Sanitize all text fields to prevent XSS
+      const sanitizedBody = {
+        ...req.body,
+        patientName: req.body.patientName ? DOMPurify.sanitize(req.body.patientName) : undefined,
+        patientEmail: req.body.patientEmail ? DOMPurify.sanitize(req.body.patientEmail).toLowerCase() : undefined,
+        patientPhone: req.body.patientPhone ? req.body.patientPhone.replace(/[^\d+\-\(\)\s]/g, '') : undefined,
+        notes: req.body.notes ? DOMPurify.sanitize(req.body.notes) : undefined,
+        appointmentType: req.body.appointmentType ? DOMPurify.sanitize(req.body.appointmentType) : undefined,
+        clinicId: clinic.id
+      };
+
+      const appointmentData = insertAppointmentSchema.parse(sanitizedBody);
       const appointment = await storage.createAppointment(appointmentData);
       res.json(appointment);
     } catch (error) {
@@ -420,6 +470,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const clinic = await storage.getClinicByUserId(userId);
       if (!clinic) {
         return res.status(404).json({ message: "Clinic not found" });
+      }
+
+      // SECURITY FIX: Verify appointment belongs to user's clinic
+      const [existingAppointment] = await db.select()
+        .from(appointments)
+        .where(eq(appointments.id, id));
+      
+      if (!existingAppointment) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+      
+      if (existingAppointment.clinicId !== clinic.id) {
+        return res.status(403).json({ message: "Access denied: Appointment does not belong to your clinic" });
       }
 
       const appointmentData = insertAppointmentSchema.partial().parse(req.body);
@@ -459,6 +522,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const clinic = await storage.getClinicByUserId(userId);
       if (!clinic) {
         return res.status(404).json({ message: "Clinic not found" });
+      }
+
+      // SECURITY FIX: Verify AI configuration belongs to user's clinic
+      const [existingConfig] = await db.select()
+        .from(aiConfigurations)
+        .where(eq(aiConfigurations.id, id));
+      
+      if (!existingConfig) {
+        return res.status(404).json({ message: "AI configuration not found" });
+      }
+      
+      if (existingConfig.clinicId !== clinic.id) {
+        return res.status(403).json({ message: "Access denied: Configuration does not belong to your clinic" });
       }
 
       const configData = insertAiConfigurationSchema.partial().parse(req.body);

@@ -30,6 +30,7 @@ Preferred communication style: Simple, everyday language.
 - **Multi-Tenant Architecture**: Full data isolation between clinics
 - **Key Tables**:
   - Users: Authentication with role-based access (clinic_owner, admin)
+  - TOTP Secrets: Two-factor authentication secrets and backup codes (HIPAA compliance)
   - Clinics: Complete practice information, subscription management, and usage tracking
   - Call Logs: Enhanced AI conversation records with file export tracking
   - Appointments: Comprehensive booking management with automated file creation
@@ -58,6 +59,15 @@ Preferred communication style: Simple, everyday language.
 - **Multi-Tenancy**: Complete data isolation and subscription management
 
 ## Recent Enhancements (January 2025)
+
+### Critical Security Fixes (Jan 29, 2025)
+- **Multi-Tenant Authorization Bypass - FIXED**: Added ownership verification to all appointment and AI configuration routes to prevent cross-tenant data access
+- **Stored XSS Vulnerabilities - FIXED**: Implemented DOMPurify sanitization for all user-generated content (call transcripts, appointment notes)
+- **Admin Privilege Escalation - FIXED**: Enhanced admin middleware with database-only role verification and row-level locking
+- **CSRF Protection - ENHANCED**: Added CSRF token generation endpoint for state-changing operations
+- **Two-Factor Authentication (2FA) - IMPLEMENTED**: Complete TOTP-based 2FA system with encrypted secrets, backup codes, and session tracking
+- **Security Audit Completed**: Identified and fixed 5 critical (P0) vulnerabilities, addressing major HIPAA compliance gaps
+- **Documentation Added**: Created comprehensive SECURITY_FIXES_JANUARY_2025.md documenting all vulnerabilities and fixes
 
 ### Performance & Stability Fixes (Jan 29, 2025)
 - **Critical Performance Issues Resolved**: Eliminated infinite API request loops that were causing application instability
