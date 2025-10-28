@@ -1,0 +1,116 @@
+-- ClinicVoice Database Schema
+
+-- Users/Clinics table
+CREATE TABLE public.clinics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  phone_number TEXT,
+  address TEXT,
+  subscription_status TEXT DEFAULT 'trial',
+  subscription_tier TEXT DEFAULT 'basic',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Call logs table
+CREATE TABLE public.call_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
+  caller_phone TEXT NOT NULL,
+  transcript TEXT,
+  duration INTEGER,
+  call_status TEXT DEFAULT 'completed',
+  sentiment_score REAL,
+  appointment_booked BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Bookings/Appointments table
+CREATE TABLE public.appointments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
+  call_log_id UUID REFERENCES public.call_logs(id),
+  patient_name TEXT NOT NULL,
+  patient_phone TEXT,
+  appointment_date TIMESTAMPTZ NOT NULL,
+  appointment_type TEXT,
+  status TEXT DEFAULT 'scheduled',
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- AI Configurations table
+CREATE TABLE public.ai_configurations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
+  greeting_message TEXT DEFAULT 'Hello! Thank you for calling. How can I help you today?',
+  business_hours JSONB DEFAULT '{"monday": {"open": "09:00", "close": "17:00"}, "tuesday": {"open": "09:00", "close": "17:00"}, "wednesday": {"open": "09:00", "close": "17:00"}, "thursday": {"open": "09:00", "close": "17:00"}, "friday": {"open": "09:00", "close": "17:00"}, "saturday": {"closed": true}, "sunday": {"closed": true}}',
+  services JSONB DEFAULT '[]',
+  personality_traits TEXT DEFAULT 'professional, empathetic, helpful',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.clinics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.call_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ai_configurations ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for clinics
+CREATE POLICY "Users can view their own clinic" ON public.clinics
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can update their own clinic" ON public.clinics
+  FOR UPDATE USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert their own clinic" ON public.clinics
+  FOR INSERT WITH CHECK (user_id = auth.uid());
+
+-- RLS Policies for call_logs
+CREATE POLICY "Users can view their clinic's call logs" ON public.call_logs
+  FOR SELECT USING (clinic_id IN (SELECT id FROM public.clinics WHERE user_id = auth.uid()));
+
+CREATE POLICY "System can insert call logs" ON public.call_logs
+  FOR INSERT WITH CHECK (true);
+
+-- RLS Policies for appointments
+CREATE POLICY "Users can view their clinic's appointments" ON public.appointments
+  FOR SELECT USING (clinic_id IN (SELECT id FROM public.clinics WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage their clinic's appointments" ON public.appointments
+  FOR ALL USING (clinic_id IN (SELECT id FROM public.clinics WHERE user_id = auth.uid()));
+
+-- RLS Policies for ai_configurations
+CREATE POLICY "Users can view their clinic's AI config" ON public.ai_configurations
+  FOR SELECT USING (clinic_id IN (SELECT id FROM public.clinics WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can update their clinic's AI config" ON public.ai_configurations
+  FOR ALL USING (clinic_id IN (SELECT id FROM public.clinics WHERE user_id = auth.uid()));
+
+-- Function to update updated_at timestamps
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggers for updated_at
+CREATE TRIGGER update_clinics_updated_at
+  BEFORE UPDATE ON public.clinics
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_appointments_updated_at
+  BEFORE UPDATE ON public.appointments
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_ai_configurations_updated_at
+  BEFORE UPDATE ON public.ai_configurations
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_updated_at_column();
