@@ -8,6 +8,9 @@ import ErrorBoundary from "@/components/error-boundary";
 import { HelpProvider, useHelp } from "@/components/help/help-provider";
 import ContextualHelp from "@/components/help/contextual-help";
 import VoiceFloatingButton from "@/components/voice/voice-floating-button";
+import SessionTimeoutWarning from "@/components/session-timeout-warning";
+import OfflineIndicator from "@/components/offline-indicator";
+import Breadcrumb from "@/components/breadcrumb";
 import Landing from "@/pages/landing";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -23,7 +26,9 @@ import AdvancedAnalytics from "@/pages/AdvancedAnalytics";
 import EnhancedSettings from "@/pages/enhanced-settings";
 import BusinessAnalytics from "@/pages/business-analytics";
 import MobileApp from "@/pages/mobile-app";
+import PrivacyPolicy from "@/pages/privacy";
 import NotFound from "@/pages/not-found";
+import CookieConsent from "@/components/cookie-consent";
 
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -79,6 +84,9 @@ function Router() {
       <Route path="/mobile">
         {isAuthenticated ? <MobileApp /> : <Login />}
       </Route>
+      <Route path="/privacy">
+        <PrivacyPolicy />
+      </Route>
       <Route path="/">
         {!isAuthenticated ? (
           <Landing />
@@ -88,8 +96,20 @@ function Router() {
           <Dashboard />
         )}
       </Route>
-      <Route component={NotFound} />
+      <Route path="*" component={NotFound} />
     </Switch>
+  );
+}
+
+function SkipNavigation() {
+  return (
+    <a
+      href="#main-content"
+      className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:bg-slate-900 focus:text-white focus:px-4 focus:py-2 focus:rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+      data-testid="link-skip-navigation"
+    >
+      Skip to main content
+    </a>
   );
 }
 
@@ -98,14 +118,20 @@ function AppWithHelp() {
 
   return (
     <>
-      <Router />
+      <OfflineIndicator />
+      <SkipNavigation />
+      <main id="main-content">
+        <Router />
+      </main>
       <VoiceFloatingButton />
+      <SessionTimeoutWarning />
       {isHelpVisible && (
         <ContextualHelp 
           isMinimized={isHelpMinimized}
           onToggleMinimize={toggleHelpMinimize}
         />
       )}
+      <CookieConsent />
     </>
   );
 }

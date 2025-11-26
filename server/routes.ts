@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { FileExportService } from "./services/fileExport";
 import { db } from "./db";
-import { clinics, users, callLogs, appointments, platformAnalytics, apiConfigurations, aiConfigurations, clinicMembers, teamInvitations, usageTracking, auditLogs, dataRetentionPolicies, apiKeys, webhooks, webhookDeliveries, apiUsage, rateLimitBuckets, cohortAnalysis, conversionEvents, callOutcomeMetrics, analyticsReports, reportDeliveries, performanceBenchmarks } from "@shared/schema";
+import { clinics, users, callLogs, appointments, platformAnalytics, apiConfigurations, aiConfigurations, clinicMembers, teamInvitations, usageTracking, auditLogs, dataRetentionPolicies, apiKeys, webhooks, webhookDeliveries, apiUsage, rateLimitBuckets, cohortAnalysis, conversionEvents, callOutcomeMetrics, analyticsReports, reportDeliveries, performanceBenchmarks, consentRecords, dataBreachIncidents } from "@shared/schema";
 import DOMPurify from 'isomorphic-dompurify';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
@@ -26,13 +26,16 @@ import { z } from "zod";
 import apiRoutes from "./routes/api";
 import publicApiRoutes from "./routes/public-api";
 import twoFactorRoutes from "./routes/2fa";
-import passport from "passport";
 import { create } from "xmlbuilder2";
 import WebSocket, { WebSocketServer } from "ws";
+import { csrfProtection } from "./middleware/security";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
+  
+  // SECURITY: Apply CSRF protection after auth (needs session)
+  app.use(csrfProtection);
 
   // SECURITY FIX: CSRF token generation endpoint
   app.get('/api/csrf-token', (req: any, res) => {
@@ -75,11 +78,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!user) {
         // Log unauthorized access attempt
-        await AuditService.log({
+        await AuditService.logAction({
           action: 'unauthorized_admin_access',
           userId,
-          metadata: { path: req.path },
-          severity: 'high'
+          entityType: 'admin_access',
+          details: { path: req.path },
+          successful: false
         });
         return res.status(403).json({ message: "Admin access required" });
       }
@@ -2017,7 +2021,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
         eventType,
         eventProperties,
-        conversionValue: conversionValue ? parseFloat(conversionValue) : null,
+        conversionValue: conversionValue ? String(conversionValue) : null,
         sessionId,
         referrerSource,
         userAgent: req.headers['user-agent'],
@@ -2153,15 +2157,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         callOutcome,
         customerSatisfaction: customerSatisfaction ? parseInt(customerSatisfaction) : null,
         appointmentBooked,
-        appointmentDate: appointmentDate ? new Date(appointmentDate) : null,
-        aiPerformanceScore: aiPerformanceScore ? parseFloat(aiPerformanceScore) : null,
+        appointmentDate: appointmentDate ? new Date(appointmentDate) : undefined,
+        aiPerformanceScore: aiPerformanceScore ? String(aiPerformanceScore) : null,
         resolutionTime: resolutionTime ? parseInt(resolutionTime) : null,
         transferredToHuman,
         callTags,
         sentiment,
-        transcriptQuality: transcriptQuality ? parseFloat(transcriptQuality) : null,
-        costPerCall: costPerCall ? parseFloat(costPerCall) : null,
-        revenueAttribution: revenueAttribution ? parseFloat(revenueAttribution) : null,
+        transcriptQuality: transcriptQuality ? String(transcriptQuality) : null,
+        costPerCall: costPerCall ? String(costPerCall) : null,
+        revenueAttribution: revenueAttribution ? String(revenueAttribution) : null,
         followupRequired,
         metadata
       }).returning();
@@ -2220,11 +2224,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             benchmarkType: 'industry',
             benchmarkCategory: 'call_metrics',
             metricName: 'answer_rate',
-            clinicValue: 85.5,
-            benchmarkValue: 78.2,
+            clinicValue: '85.5',
+            benchmarkValue: '78.2',
             percentileRank: 75,
             sampleSize: 450,
-            confidenceLevel: 0.95,
+            confidenceLevel: '0.95',
             trend: 'improving',
             period: currentPeriod,
             metadata: { industry: 'healthcare', clinic_size: 'medium' }
@@ -2234,11 +2238,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             benchmarkType: 'industry',
             benchmarkCategory: 'conversion',
             metricName: 'booking_conversion',
-            clinicValue: 42.8,
-            benchmarkValue: 38.9,
+            clinicValue: '42.8',
+            benchmarkValue: '38.9',
             percentileRank: 68,
             sampleSize: 380,
-            confidenceLevel: 0.95,
+            confidenceLevel: '0.95',
             trend: 'stable',
             period: currentPeriod,
             metadata: { industry: 'healthcare', clinic_size: 'medium' }
@@ -2343,7 +2347,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Calculate next scheduled time based on frequency
       const now = new Date();
-      let nextScheduled = new Date(now);
+      let nextScheduled: Date | undefined = new Date(now);
       
       switch (frequency) {
         case 'daily':
@@ -2359,7 +2363,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           nextScheduled.setMonth(now.getMonth() + 3);
           break;
         default:
-          nextScheduled = null; // on_demand reports
+          nextScheduled = undefined; // on_demand reports
       }
 
       const [report] = await db.insert(analyticsReports).values({
@@ -2677,6 +2681,472 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error logging frontend error:", error);
       res.status(500).json({ message: "Failed to log error" });
+    }
+  });
+
+  // ===========================
+  // GDPR/HIPAA COMPLIANCE APIs
+  // ===========================
+
+  // --- CONSENT MANAGEMENT APIs ---
+
+  // Record patient consent
+  app.post('/api/clinics/:clinicId/consent', isAuthenticated, auditCreate('consent_record'), async (req: any, res) => {
+    try {
+      const { clinicId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      // Verify clinic access
+      const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId));
+      if (!clinic || clinic.ownerId !== userId) {
+        const [member] = await db.select().from(clinicMembers)
+          .where(and(eq(clinicMembers.userId, userId), eq(clinicMembers.clinicId, clinicId), eq(clinicMembers.isActive, true)));
+        if (!member) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { patientIdentifier, consentType, consentStatus, consentMethod, consentVersion, legalBasis, processingPurpose, expiresAt } = req.body;
+
+      if (!patientIdentifier || !consentType) {
+        return res.status(400).json({ message: "Patient identifier and consent type are required" });
+      }
+
+      const [consentRecord] = await db.insert(consentRecords).values({
+        clinicId,
+        patientIdentifier: DOMPurify.sanitize(patientIdentifier),
+        consentType,
+        consentStatus: consentStatus !== false,
+        consentMethod: consentMethod || 'verbal',
+        consentVersion,
+        legalBasis: legalBasis || 'consent',
+        processingPurpose: processingPurpose ? DOMPurify.sanitize(processingPurpose) : null,
+        grantedAt: new Date(),
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      }).returning();
+
+      res.status(201).json({ message: "Consent recorded successfully", consent: consentRecord });
+    } catch (error) {
+      console.error("Error recording consent:", error);
+      res.status(500).json({ message: "Failed to record consent" });
+    }
+  });
+
+  // Withdraw patient consent (GDPR right to withdraw)
+  app.post('/api/clinics/:clinicId/consent/withdraw', isAuthenticated, auditUpdate('consent_record'), async (req: any, res) => {
+    try {
+      const { clinicId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId));
+      if (!clinic || clinic.ownerId !== userId) {
+        const [member] = await db.select().from(clinicMembers)
+          .where(and(eq(clinicMembers.userId, userId), eq(clinicMembers.clinicId, clinicId), eq(clinicMembers.isActive, true)));
+        if (!member) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { patientIdentifier, consentType } = req.body;
+
+      if (!patientIdentifier) {
+        return res.status(400).json({ message: "Patient identifier is required" });
+      }
+
+      // Update all matching consent records to withdrawn
+      const whereCondition = consentType 
+        ? and(eq(consentRecords.clinicId, clinicId), eq(consentRecords.patientIdentifier, patientIdentifier), eq(consentRecords.consentType, consentType))
+        : and(eq(consentRecords.clinicId, clinicId), eq(consentRecords.patientIdentifier, patientIdentifier));
+
+      const updated = await db.update(consentRecords)
+        .set({ consentStatus: false, withdrawnAt: new Date(), updatedAt: new Date() })
+        .where(whereCondition)
+        .returning();
+
+      await AuditService.logAction({
+        userId,
+        clinicId,
+        action: 'CONSENT_WITHDRAWN',
+        entityType: 'consent_record',
+        details: { patientIdentifier, consentType, recordsUpdated: updated.length }
+      });
+
+      res.json({ message: "Consent withdrawn successfully", recordsUpdated: updated.length });
+    } catch (error) {
+      console.error("Error withdrawing consent:", error);
+      res.status(500).json({ message: "Failed to withdraw consent" });
+    }
+  });
+
+  // Get consent status for a patient
+  app.get('/api/clinics/:clinicId/consent/:patientIdentifier', isAuthenticated, async (req: any, res) => {
+    try {
+      const { clinicId, patientIdentifier } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId));
+      if (!clinic || clinic.ownerId !== userId) {
+        const [member] = await db.select().from(clinicMembers)
+          .where(and(eq(clinicMembers.userId, userId), eq(clinicMembers.clinicId, clinicId), eq(clinicMembers.isActive, true)));
+        if (!member) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const records = await db.select().from(consentRecords)
+        .where(and(eq(consentRecords.clinicId, clinicId), eq(consentRecords.patientIdentifier, decodeURIComponent(patientIdentifier))));
+
+      res.json({ consents: records });
+    } catch (error) {
+      console.error("Error fetching consent status:", error);
+      res.status(500).json({ message: "Failed to fetch consent status" });
+    }
+  });
+
+  // --- DATA BREACH INCIDENT MANAGEMENT APIs (72-hour notification requirement) ---
+
+  // Report a data breach incident (admin only)
+  app.post('/api/admin/data-breach', isAuthenticated, auditCreate('data_breach_incident'), async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { severity, affectedClinics, affectedDataTypes, estimatedRecordsAffected, detectionMethod, incidentDescription } = req.body;
+
+      if (!severity || !incidentDescription) {
+        return res.status(400).json({ message: "Severity and incident description are required" });
+      }
+
+      const incidentId = `BREACH-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      const detectedAt = new Date();
+      const notificationDeadline = new Date(detectedAt.getTime() + 72 * 60 * 60 * 1000); // 72 hours
+
+      const [incident] = await db.insert(dataBreachIncidents).values({
+        incidentId,
+        severity,
+        status: 'open',
+        affectedClinics: affectedClinics || [],
+        affectedDataTypes: affectedDataTypes || [],
+        estimatedRecordsAffected,
+        detectionMethod: detectionMethod || 'manual',
+        incidentDescription: DOMPurify.sanitize(incidentDescription),
+        notificationRequired: severity === 'high' || severity === 'critical',
+      }).returning();
+
+      await AuditService.logAction({
+        userId,
+        action: 'DATA_BREACH_REPORTED',
+        entityType: 'data_breach_incident',
+        entityId: incident.id,
+        details: { incidentId, severity, notificationDeadline }
+      });
+
+      res.status(201).json({
+        message: "Data breach incident recorded",
+        incident,
+        notificationDeadline: notificationDeadline.toISOString(),
+        hoursRemaining: 72,
+        warning: severity === 'high' || severity === 'critical' 
+          ? "GDPR/HIPAA requires notification within 72 hours for high/critical breaches" 
+          : null
+      });
+    } catch (error) {
+      console.error("Error reporting data breach:", error);
+      res.status(500).json({ message: "Failed to report data breach" });
+    }
+  });
+
+  // Update data breach incident status
+  app.put('/api/admin/data-breach/:incidentId', isAuthenticated, auditUpdate('data_breach_incident'), async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { incidentId } = req.params;
+      const { status, rootCause, remediationSteps, reportedToAuthorities, notificationsSent } = req.body;
+
+      const updates: any = { updatedAt: new Date() };
+      if (status) updates.status = status;
+      if (rootCause) updates.rootCause = DOMPurify.sanitize(rootCause);
+      if (remediationSteps) updates.remediationSteps = DOMPurify.sanitize(remediationSteps);
+      if (reportedToAuthorities !== undefined) {
+        updates.reportedToAuthorities = reportedToAuthorities;
+        if (reportedToAuthorities) updates.reportedAt = new Date();
+      }
+      if (notificationsSent) updates.notificationsSent = notificationsSent;
+      if (status === 'resolved' || status === 'closed') updates.resolvedAt = new Date();
+
+      const [updated] = await db.update(dataBreachIncidents)
+        .set(updates)
+        .where(eq(dataBreachIncidents.incidentId, incidentId))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Incident not found" });
+      }
+
+      res.json({ message: "Incident updated", incident: updated });
+    } catch (error) {
+      console.error("Error updating data breach:", error);
+      res.status(500).json({ message: "Failed to update incident" });
+    }
+  });
+
+  // Get all data breach incidents (admin only)
+  app.get('/api/admin/data-breaches', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { status } = req.query;
+      const whereClause = status ? eq(dataBreachIncidents.status, status as string) : undefined;
+      
+      const incidents = whereClause 
+        ? await db.select().from(dataBreachIncidents).where(whereClause).orderBy(desc(dataBreachIncidents.createdAt))
+        : await db.select().from(dataBreachIncidents).orderBy(desc(dataBreachIncidents.createdAt));
+
+      // Calculate 72-hour deadline for open incidents
+      const incidentsWithDeadlines = incidents.map(incident => {
+        if (incident.status === 'open' || incident.status === 'investigating') {
+          const deadline = new Date(incident.createdAt!.getTime() + 72 * 60 * 60 * 1000);
+          const hoursRemaining = Math.max(0, (deadline.getTime() - Date.now()) / (1000 * 60 * 60));
+          return { ...incident, notificationDeadline: deadline, hoursRemaining: Math.round(hoursRemaining * 10) / 10 };
+        }
+        return incident;
+      });
+
+      res.json({ incidents: incidentsWithDeadlines });
+    } catch (error) {
+      console.error("Error fetching data breaches:", error);
+      res.status(500).json({ message: "Failed to fetch incidents" });
+    }
+  });
+
+  // --- SUBJECT ACCESS REQUEST (SAR) API - GDPR Right of Access ---
+
+  app.post('/api/clinics/:clinicId/sar', isAuthenticated, auditCreate('subject_access_request'), async (req: any, res) => {
+    try {
+      const { clinicId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId));
+      if (!clinic || clinic.ownerId !== userId) {
+        const [member] = await db.select().from(clinicMembers)
+          .where(and(eq(clinicMembers.userId, userId), eq(clinicMembers.clinicId, clinicId), eq(clinicMembers.isActive, true)));
+        if (!member) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { patientIdentifier } = req.body;
+      if (!patientIdentifier) {
+        return res.status(400).json({ message: "Patient identifier is required" });
+      }
+
+      // Gather all data for the patient (GDPR Right of Access)
+      const patientCallLogs = await db.select().from(callLogs)
+        .where(and(eq(callLogs.clinicId, clinicId), eq(callLogs.callerPhone, patientIdentifier)));
+      
+      const patientAppointments = await db.select().from(appointments)
+        .where(and(eq(appointments.clinicId, clinicId), eq(appointments.patientPhone, patientIdentifier)));
+      
+      const patientConsents = await db.select().from(consentRecords)
+        .where(and(eq(consentRecords.clinicId, clinicId), eq(consentRecords.patientIdentifier, patientIdentifier)));
+
+      const responseDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days per GDPR
+
+      await AuditService.logAction({
+        userId,
+        clinicId,
+        action: 'SUBJECT_ACCESS_REQUEST_PROCESSED',
+        entityType: 'patient_data',
+        details: { 
+          patientIdentifier, 
+          callLogsCount: patientCallLogs.length,
+          appointmentsCount: patientAppointments.length,
+          consentsCount: patientConsents.length
+        }
+      });
+
+      res.json({
+        message: "Subject Access Request processed",
+        requestDate: new Date().toISOString(),
+        responseDeadline: responseDeadline.toISOString(),
+        patientIdentifier,
+        data: {
+          callLogs: patientCallLogs,
+          appointments: patientAppointments,
+          consentRecords: patientConsents,
+        },
+        dataCategories: [
+          "Call recordings and transcripts",
+          "Appointment bookings",
+          "Consent records",
+        ],
+        processingPurposes: [
+          "Healthcare service provision",
+          "Appointment scheduling",
+          "Call handling and response"
+        ],
+        retentionPeriod: "7 years from last interaction (HIPAA requirement)",
+        dataControllerInfo: {
+          clinicName: clinic.name,
+          clinicEmail: clinic.email
+        }
+      });
+    } catch (error) {
+      console.error("Error processing SAR:", error);
+      res.status(500).json({ message: "Failed to process Subject Access Request" });
+    }
+  });
+
+  // --- PATIENT DATA ERASURE API - GDPR Right to be Forgotten ---
+
+  app.delete('/api/clinics/:clinicId/patient-data/:patientIdentifier', isAuthenticated, auditDelete('patient_data'), async (req: any, res) => {
+    try {
+      const { clinicId, patientIdentifier } = req.params;
+      const userId = req.user.claims.sub;
+      const decodedIdentifier = decodeURIComponent(patientIdentifier);
+      
+      const [clinic] = await db.select().from(clinics).where(eq(clinics.id, clinicId));
+      if (!clinic || clinic.ownerId !== userId) {
+        return res.status(403).json({ message: "Only clinic owners can delete patient data" });
+      }
+
+      const { confirmDeletion, retentionOverride } = req.body;
+
+      if (!confirmDeletion || confirmDeletion !== 'PERMANENTLY_DELETE_PATIENT_DATA') {
+        return res.status(400).json({ 
+          message: "Confirmation required. Send 'confirmDeletion': 'PERMANENTLY_DELETE_PATIENT_DATA'",
+          warning: "This action is irreversible and may conflict with HIPAA retention requirements"
+        });
+      }
+
+      // Check for legal hold or retention requirements
+      if (!retentionOverride) {
+        // Default: Check if data is within retention period (7 years for healthcare)
+        const oldestAllowedDate = new Date();
+        oldestAllowedDate.setFullYear(oldestAllowedDate.getFullYear() - 7);
+        
+        const recentCalls = await db.select({ count: sql<number>`count(*)` })
+          .from(callLogs)
+          .where(and(
+            eq(callLogs.clinicId, clinicId), 
+            eq(callLogs.callerPhone, decodedIdentifier),
+            gte(callLogs.createdAt, oldestAllowedDate)
+          ));
+
+        if (recentCalls[0]?.count > 0) {
+          return res.status(409).json({
+            message: "Cannot delete data within HIPAA retention period (7 years)",
+            info: "Set 'retentionOverride': true to override (requires documented legal basis)",
+            recordsWithinRetention: recentCalls[0].count
+          });
+        }
+      }
+
+      // Delete patient data
+      const deletedCalls = await db.delete(callLogs)
+        .where(and(eq(callLogs.clinicId, clinicId), eq(callLogs.callerPhone, decodedIdentifier)))
+        .returning({ id: callLogs.id });
+
+      const deletedAppointments = await db.delete(appointments)
+        .where(and(eq(appointments.clinicId, clinicId), eq(appointments.patientPhone, decodedIdentifier)))
+        .returning({ id: appointments.id });
+
+      const deletedConsents = await db.delete(consentRecords)
+        .where(and(eq(consentRecords.clinicId, clinicId), eq(consentRecords.patientIdentifier, decodedIdentifier)))
+        .returning({ id: consentRecords.id });
+
+      await AuditService.logAction({
+        userId,
+        clinicId,
+        action: 'GDPR_ERASURE_COMPLETED',
+        entityType: 'patient_data',
+        details: { 
+          patientIdentifier: decodedIdentifier,
+          deletedCallLogs: deletedCalls.length,
+          deletedAppointments: deletedAppointments.length,
+          deletedConsents: deletedConsents.length,
+          retentionOverride: !!retentionOverride
+        }
+      });
+
+      res.json({
+        message: "Patient data erased successfully (GDPR Right to Erasure)",
+        erasureDate: new Date().toISOString(),
+        deletedRecords: {
+          callLogs: deletedCalls.length,
+          appointments: deletedAppointments.length,
+          consentRecords: deletedConsents.length
+        },
+        auditNote: "This erasure has been logged for compliance purposes"
+      });
+    } catch (error) {
+      console.error("Error erasing patient data:", error);
+      res.status(500).json({ message: "Failed to erase patient data" });
+    }
+  });
+
+  // --- DATA RETENTION POLICY APIs ---
+
+  app.get('/api/admin/retention-policies', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const policies = await db.select().from(dataRetentionPolicies);
+      res.json({ policies });
+    } catch (error) {
+      console.error("Error fetching retention policies:", error);
+      res.status(500).json({ message: "Failed to fetch retention policies" });
+    }
+  });
+
+  app.put('/api/admin/retention-policies/:dataType', isAuthenticated, auditUpdate('retention_policy'), async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const [user] = await db.select().from(users).where(eq(users.id, userId));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { dataType } = req.params;
+      const { retentionPeriodDays, description, legalBasis, isActive } = req.body;
+
+      // Minimum retention periods for HIPAA compliance
+      const minimumRetention: { [key: string]: number } = {
+        'call_logs': 2555,      // 7 years
+        'appointments': 2555,   // 7 years
+        'audit_logs': 2190,     // 6 years
+      };
+
+      if (minimumRetention[dataType] && retentionPeriodDays < minimumRetention[dataType]) {
+        return res.status(400).json({
+          message: `Cannot set retention below HIPAA minimum (${minimumRetention[dataType]} days for ${dataType})`,
+          minimumDays: minimumRetention[dataType]
+        });
+      }
+
+      const [updated] = await db.update(dataRetentionPolicies)
+        .set({ 
+          retentionPeriodDays: retentionPeriodDays ?? undefined,
+          description: description ?? undefined,
+          legalBasis: legalBasis ?? undefined,
+          isActive: isActive ?? undefined,
+          updatedAt: new Date()
+        })
+        .where(eq(dataRetentionPolicies.dataType, dataType))
+        .returning();
+
+      res.json({ message: "Retention policy updated", policy: updated });
+    } catch (error) {
+      console.error("Error updating retention policy:", error);
+      res.status(500).json({ message: "Failed to update retention policy" });
     }
   });
 

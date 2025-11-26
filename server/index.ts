@@ -1,7 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { securityHeaders, sanitizeInput, createRateLimit, errorHandler } from "./middleware/security";
+import { securityHeaders, sanitizeInput, createRateLimit, errorHandler, csrfProtection } from "./middleware/security";
 
 const app = express();
 

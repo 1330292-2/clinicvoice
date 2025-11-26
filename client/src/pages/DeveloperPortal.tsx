@@ -252,7 +252,7 @@ export default function DeveloperPortal() {
             <div>
               <h3 className="text-lg font-semibold">API Keys</h3>
               <p className="text-sm text-muted-foreground">
-                Create and manage API keys for accessing the ClinicVoice API
+                Create and manage API keys for accessing the VitalRelay API
               </p>
             </div>
             <Dialog open={showApiKeyDialog} onOpenChange={setShowApiKeyDialog}>
@@ -473,7 +473,7 @@ export default function DeveloperPortal() {
                 <DialogHeader>
                   <DialogTitle>Create New Webhook</DialogTitle>
                   <DialogDescription>
-                    Configure a webhook to receive event notifications from ClinicVoice.
+                    Configure a webhook to receive event notifications from VitalRelay.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
@@ -614,7 +614,7 @@ export default function DeveloperPortal() {
                 API Documentation
               </CardTitle>
               <CardDescription>
-                Complete guide to integrating with the ClinicVoice API
+                Complete guide to integrating with the VitalRelay API
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

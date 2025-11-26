@@ -43,7 +43,14 @@ const getOidcConfig = memoize(
 );
 
 export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+  // HIPAA COMPLIANCE: Session timeout configuration
+  // Production: 15 minutes (HIPAA automatic logoff requirement)
+  // Development: 4 hours (for easier testing)
+  const isProduction = process.env.NODE_ENV === 'production';
+  const sessionTtl = isProduction 
+    ? 15 * 60 * 1000  // 15 minutes for HIPAA compliance
+    : 4 * 60 * 60 * 1000; // 4 hours for development
+  
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
@@ -56,10 +63,10 @@ export function getSession() {
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    rolling: true, // Reset expiry on activity
+    rolling: true, // Reset expiry on activity (HIPAA: activity extends session)
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction,
       sameSite: 'strict',
       maxAge: sessionTtl,
     },

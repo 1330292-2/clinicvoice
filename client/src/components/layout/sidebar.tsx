@@ -10,11 +10,11 @@ import {
   Settings, 
   Brain, 
   ChartLine,
-  Stethoscope,
   MoreVertical,
   Code,
   TrendingUp
 } from "lucide-react";
+import { LogoIcon } from "@/components/ui/logo";
 import type { Clinic } from "@shared/schema";
 
 const navigation = [
@@ -49,9 +49,7 @@ export default function Sidebar() {
       {/* Clinic Header */}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-            <Stethoscope className="text-white text-lg" />
-          </div>
+          <LogoIcon className="w-10 h-10" />
           <div>
             <h2 className="font-semibold text-gray-900">
               {clinic?.name || "Your Clinic"}

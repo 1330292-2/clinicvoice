@@ -76,7 +76,7 @@ export default function SmartNotifications() {
       id: "4",
       type: "revenue_milestone",
       title: "Monthly Savings Milestone",
-      message: "You've saved £1,500 this month with ClinicVoice AI",
+      message: "You've saved £1,500 this month with VitalRelay AI",
       timestamp: new Date(Date.now() - 60 * 60 * 1000),
       priority: "medium",
       actionRequired: false,

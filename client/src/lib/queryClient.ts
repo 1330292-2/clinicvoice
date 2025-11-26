@@ -41,6 +41,19 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+// Smart retry: only retry on network errors, not on 4xx/5xx responses
+const shouldRetry = (failureCount: number, error: unknown): boolean => {
+  if (failureCount >= 2) return false;
+  
+  // Don't retry on HTTP errors (they have status codes)
+  if (error instanceof Error && error.message.match(/^\d{3}:/)) {
+    return false;
+  }
+  
+  // Retry on network errors (fetch failures)
+  return true;
+};
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -48,14 +61,16 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       refetchOnMount: false,
-      refetchOnReconnect: false,
+      refetchOnReconnect: true, // Refetch when coming back online
       refetchIntervalInBackground: false,
-      staleTime: Infinity, // Cache forever - no automatic refetching
-      gcTime: Infinity, // Never garbage collect - permanent cache
-      retry: false, // No retries to prevent loops
+      staleTime: 5 * 60 * 1000, // 5 minutes - data is fresh for 5 min
+      gcTime: 30 * 60 * 1000, // 30 minutes - cache cleanup after 30 min of inactivity
+      retry: shouldRetry,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
     },
     mutations: {
-      retry: false,
+      retry: shouldRetry,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
     },
   },
 });

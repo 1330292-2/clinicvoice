@@ -31,10 +31,10 @@ interface TutorialStep {
 
 const tutorialSteps: TutorialStep[] = [
   {
-    title: "Welcome to ClinicVoice",
+    title: "Welcome to VitalRelay",
     description: "Your AI-powered receptionist for healthcare clinics",
     icon: Phone,
-    content: "ClinicVoice transforms how your clinic handles phone calls. Our AI receptionist works 24/7 to answer calls, book appointments, and provide information to patients - all while maintaining the professional standards your clinic requires.",
+    content: "VitalRelay transforms how your clinic handles phone calls. Our AI receptionist works 24/7 to answer calls, book appointments, and provide information to patients - all while maintaining the professional standards your clinic requires.",
     tips: [
       "Available 24/7 - never miss a call again",
       "Handles multiple calls simultaneously",
@@ -203,7 +203,7 @@ export default function BusinessTutorial({ open, onOpenChange }: BusinessTutoria
                   <div>
                     <h4 className="font-medium text-gray-900 mb-2">Watch Demo Video</h4>
                     <p className="text-gray-600 text-sm">
-                      See ClinicVoice in action - handling real patient calls
+                      See VitalRelay in action - handling real patient calls
                     </p>
                   </div>
                   <Button variant="outline" size="sm">

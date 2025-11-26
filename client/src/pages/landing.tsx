@@ -1,7 +1,22 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { 
   Phone, 
   Brain, 
@@ -15,16 +30,23 @@ import {
   BarChart3, 
   Zap,
   HeartHandshake,
-  Stethoscope,
   Building2,
   CheckCircle,
-  Globe
+  Globe,
+  Play,
+  X,
+  Menu
 } from "lucide-react";
+import Logo, { LogoIcon } from "@/components/ui/logo";
 import { formatGBP, SUBSCRIPTION_PRICING, getSavingsPercentage } from "@/lib/currency";
 import clinicReceptionImage from "@assets/generated_images/Healthcare_clinic_reception_interior_2ef7a2d9.png";
 import healthcareTechImage from "@assets/generated_images/Healthcare_professionals_using_technology_3dda56fe.png";
+import demoVideo from "@assets/generated_videos/ai_voice_waveform_visualization.mp4";
 
 export default function Landing() {
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
   const features = [
     {
       icon: <Phone className="h-8 w-8 text-blue-600" />,
@@ -63,7 +85,7 @@ export default function Landing() {
       name: "Dr. Sarah Johnson",
       role: "GP Practice Owner",
       location: "London",
-      content: "ClinicVoice transformed our patient experience. We've seen a 60% reduction in missed calls and our patients love the professional service.",
+      content: "VitalRelay transformed our patient experience. We've seen a 60% reduction in missed calls and our patients love the professional service.",
       rating: 5
     },
     {
@@ -95,14 +117,7 @@ export default function Landing() {
       <header className="relative bg-white/95 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
-            <div className="flex items-center space-x-3">
-              <div className="h-12 w-12 bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 rounded-2xl flex items-center justify-center shadow-lg">
-                <Stethoscope className="h-7 w-7 text-white" />
-              </div>
-              <span className="text-3xl font-black tracking-tight text-slate-900">
-                ClinicVoice
-              </span>
-            </div>
+            <Logo size="md" />
             <nav className="hidden md:flex items-center space-x-10">
               <a href="#features" className="text-gray-700 hover:text-slate-900 transition-colors font-medium">Features</a>
               <a href="#pricing" className="text-gray-700 hover:text-slate-900 transition-colors font-medium">Pricing</a>
@@ -118,6 +133,66 @@ export default function Landing() {
                 </Button>
               </a>
             </nav>
+            
+            {/* Mobile Menu */}
+            <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+              <SheetTrigger asChild className="md:hidden">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="md:hidden"
+                  aria-label="Open menu"
+                  data-testid="button-mobile-menu"
+                >
+                  <Menu className="h-6 w-6" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[300px] sm:w-[350px]">
+                <SheetHeader>
+                  <SheetTitle>
+                    <Logo size="sm" />
+                  </SheetTitle>
+                </SheetHeader>
+                <nav className="flex flex-col gap-4 mt-8">
+                  <a 
+                    href="#features" 
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-lg font-medium text-slate-700 hover:text-slate-900 transition-colors py-2 border-b border-slate-100"
+                    data-testid="link-mobile-features"
+                  >
+                    Features
+                  </a>
+                  <a 
+                    href="#pricing" 
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-lg font-medium text-slate-700 hover:text-slate-900 transition-colors py-2 border-b border-slate-100"
+                    data-testid="link-mobile-pricing"
+                  >
+                    Pricing
+                  </a>
+                  <a 
+                    href="#testimonials" 
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="text-lg font-medium text-slate-700 hover:text-slate-900 transition-colors py-2 border-b border-slate-100"
+                    data-testid="link-mobile-testimonials"
+                  >
+                    Reviews
+                  </a>
+                  <div className="flex flex-col gap-3 mt-6">
+                    <a href="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button variant="outline" className="w-full" data-testid="button-mobile-signin">
+                        Sign In
+                      </Button>
+                    </a>
+                    <a href="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button className="w-full bg-slate-900 hover:bg-slate-800" data-testid="button-mobile-trial">
+                        Start Free Trial
+                      </Button>
+                    </a>
+                  </div>
+                </nav>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </header>
@@ -154,7 +229,14 @@ export default function Landing() {
                   <ArrowRight className="ml-3 h-6 w-6" />
                 </Button>
               </a>
-              <Button size="lg" variant="outline" className="border-2 border-slate-300 text-slate-700 hover:bg-slate-50 text-xl px-12 py-6 rounded-2xl font-semibold">
+              <Button 
+                size="lg" 
+                variant="outline" 
+                className="border-2 border-slate-300 text-slate-700 hover:bg-slate-50 text-xl px-12 py-6 rounded-2xl font-semibold"
+                onClick={() => setIsDemoOpen(true)}
+                data-testid="button-view-demo"
+              >
+                <Play className="mr-3 h-6 w-6" />
                 View Live Demo
               </Button>
             </div>
@@ -273,7 +355,7 @@ export default function Landing() {
               <span className="text-slate-600">Proven Daily</span>
             </h2>
             <p className="text-2xl text-slate-600 max-w-4xl mx-auto leading-relaxed">
-              Healthcare professionals across the UK trust ClinicVoice to deliver 
+              Healthcare professionals across the UK trust VitalRelay to deliver 
               <span className="text-slate-900 font-semibold"> exceptional patient experiences</span> consistently.
             </p>
           </div>
@@ -463,18 +545,15 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-4 gap-12">
             <div className="col-span-2">
-              <div className="flex items-center space-x-3 mb-6">
-                <div className="h-10 w-10 bg-slate-900 rounded-2xl flex items-center justify-center">
-                  <Stethoscope className="h-6 w-6 text-white" />
-                </div>
-                <span className="text-2xl font-black text-slate-900">ClinicVoice</span>
+              <div className="mb-6">
+                <Logo size="md" />
               </div>
               <p className="text-slate-600 mb-6 max-w-md text-lg leading-relaxed">
                 The UK's premier AI receptionist platform, trusted by healthcare professionals 
                 who demand <span className="text-slate-900 font-semibold">exceptional standards.</span>
               </p>
               <div className="text-slate-500">
-                <p className="mb-2">© 2024 ClinicVoice Ltd. All rights reserved.</p>
+                <p className="mb-2">© 2024 VitalRelay Ltd. All rights reserved.</p>
                 <p>Registered in England & Wales • Company No. 12345678</p>
                 <p className="mt-2 text-sm">Licensed by the Care Quality Commission</p>
               </div>
@@ -496,9 +575,9 @@ export default function Landing() {
               <ul className="space-y-3 text-slate-600">
                 <li><a href="#" className="hover:text-slate-900 transition-colors font-medium">Knowledge Base</a></li>
                 <li><a href="#" className="hover:text-slate-900 transition-colors font-medium">Premium Support</a></li>
-                <li><a href="#" className="hover:text-slate-900 transition-colors font-medium">Privacy Policy</a></li>
+                <li><Link href="/privacy" className="hover:text-slate-900 transition-colors font-medium" data-testid="link-privacy-policy">Privacy Policy</Link></li>
                 <li><a href="#" className="hover:text-slate-900 transition-colors font-medium">Terms of Service</a></li>
-                <li><a href="#" className="hover:text-slate-900 transition-colors font-medium">GDPR Compliance</a></li>
+                <li><Link href="/privacy" className="hover:text-slate-900 transition-colors font-medium" data-testid="link-gdpr-compliance">GDPR Compliance</Link></li>
               </ul>
             </div>
           </div>
@@ -526,6 +605,84 @@ export default function Landing() {
           </div>
         </div>
       </footer>
+
+      {/* Demo Video Modal */}
+      <Dialog open={isDemoOpen} onOpenChange={setIsDemoOpen}>
+        <DialogContent className="max-w-4xl w-full p-0 bg-slate-900 border-slate-700 overflow-hidden">
+          <DialogHeader className="p-6 pb-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="text-2xl font-bold text-white mb-2">
+                  See VitalRelay in Action
+                </DialogTitle>
+                <DialogDescription className="text-slate-400 text-lg">
+                  Watch how our AI receptionist handles patient calls with natural, professional conversations
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          
+          <div className="p-6">
+            <div className="relative rounded-2xl overflow-hidden bg-slate-800 aspect-video shadow-2xl">
+              <video
+                src={demoVideo}
+                className="w-full h-full object-cover"
+                controls
+                autoPlay
+                loop
+                playsInline
+                data-testid="video-demo"
+              >
+                Your browser does not support the video tag.
+              </video>
+              
+              {/* Video Overlay Content */}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-900/90 to-transparent p-6">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span className="text-white font-medium">AI Receptionist Active</span>
+                  </div>
+                  <div className="text-slate-400">|</div>
+                  <div className="text-slate-300">Processing patient inquiry...</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Demo Features */}
+            <div className="mt-6 grid grid-cols-3 gap-4">
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <Phone className="h-6 w-6 text-blue-400 mb-2" />
+                <h4 className="text-white font-semibold mb-1">Instant Response</h4>
+                <p className="text-slate-400 text-sm">Answers calls within 2 seconds, 24/7</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <Calendar className="h-6 w-6 text-emerald-400 mb-2" />
+                <h4 className="text-white font-semibold mb-1">Smart Booking</h4>
+                <p className="text-slate-400 text-sm">Schedules appointments automatically</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <Shield className="h-6 w-6 text-amber-400 mb-2" />
+                <h4 className="text-white font-semibold mb-1">HIPAA Compliant</h4>
+                <p className="text-slate-400 text-sm">Enterprise-grade data security</p>
+              </div>
+            </div>
+            
+            {/* CTA */}
+            <div className="mt-6 flex items-center justify-between">
+              <p className="text-slate-400">
+                Ready to transform your practice?
+              </p>
+              <a href="/login">
+                <Button className="bg-white text-slate-900 hover:bg-slate-100 font-semibold px-6">
+                  Start Free Trial
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </a>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

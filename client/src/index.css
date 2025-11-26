@@ -65,8 +65,28 @@
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+/* Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -100,5 +120,96 @@
   
   .mobile-text-sm {
     font-size: 0.875rem !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt !important;
+  }
+
+  .print\\:hidden,
+  nav,
+  aside,
+  button:not(.print\\:block),
+  .fixed,
+  .sticky {
+    display: none !important;
+  }
+
+  .print\\:block {
+    display: block !important;
+  }
+
+  a {
+    text-decoration: none !important;
+    color: black !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border: 1px solid #ddd !important;
+    padding: 8px !important;
+    text-align: left !important;
+  }
+
+  th {
+    background-color: #f5f5f5 !important;
+    font-weight: bold !important;
+  }
+
+  .page-break {
+    page-break-before: always !important;
+  }
+
+  @page {
+    margin: 1cm;
+  }
+}
+
+/* Mobile card view for tables */
+@media (max-width: 640px) {
+  .responsive-table {
+    display: block;
+  }
+
+  .responsive-table thead {
+    display: none;
+  }
+
+  .responsive-table tbody tr {
+    display: block;
+    margin-bottom: 1rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: hsl(var(--card));
+  }
+
+  .responsive-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border: none;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .responsive-table tbody td:last-child {
+    border-bottom: none;
+  }
+
+  .responsive-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: hsl(var(--muted-foreground));
+    margin-right: 1rem;
   }
 }

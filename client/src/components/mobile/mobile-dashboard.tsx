@@ -75,7 +75,7 @@ export default function MobileDashboard() {
       <div className="bg-white shadow-sm border-b sticky top-0 z-50">
         <div className="flex items-center justify-between p-4">
           <div>
-            <h1 className="text-xl font-bold">ClinicVoice</h1>
+            <h1 className="text-xl font-bold">VitalRelay</h1>
             <p className="text-sm text-gray-600">Mobile Dashboard</p>
           </div>
           <Button

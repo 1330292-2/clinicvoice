@@ -18,7 +18,7 @@ export default function Login() {
             <Stethoscope className="h-10 w-10 text-white" />
           </div>
           <h1 className="text-4xl font-black text-slate-900 mb-2">
-            ClinicVoice
+            VitalRelay
           </h1>
           <p className="text-lg text-slate-600 font-medium">
             AI-Powered Healthcare Management

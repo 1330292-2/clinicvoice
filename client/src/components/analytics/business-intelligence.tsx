@@ -424,7 +424,7 @@ export default function BusinessIntelligence() {
                   <span className="font-medium">£3,200/month</span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-                  <span>ClinicVoice AI</span>
+                  <span>VitalRelay AI</span>
                   <span className="font-medium">£199/month</span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-green-50 rounded border border-green-200">

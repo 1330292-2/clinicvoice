@@ -51,7 +51,7 @@ export default function ContextualHelp({ isMinimized = false, onToggleMinimize }
       '/settings': 'Settings - Platform configuration',
       '/analytics': 'Analytics - Performance metrics'
     };
-    return contexts[location as keyof typeof contexts] || 'ClinicVoice Platform';
+    return contexts[location as keyof typeof contexts] || 'VitalRelay Platform';
   };
 
   // Generate contextual suggestions based on current page
@@ -90,7 +90,7 @@ export default function ContextualHelp({ isMinimized = false, onToggleMinimize }
     };
 
     setContextSuggestions(suggestions[location as keyof typeof suggestions] || [
-      "How does ClinicVoice work?",
+      "How does VitalRelay work?",
       "What features are available?",
       "How do I get started?"
     ]);

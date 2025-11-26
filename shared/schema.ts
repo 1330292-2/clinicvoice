@@ -44,7 +44,7 @@ export const users = pgTable("users", {
 // SECURITY: Two-Factor Authentication table (HIPAA requirement)
 export const totpSecrets = pgTable("totp_secrets", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   secret: text("secret").notNull(), // Encrypted TOTP secret
   enabled: boolean("enabled").notNull().default(false),
   backupCodes: jsonb("backup_codes"), // Encrypted recovery codes (array)

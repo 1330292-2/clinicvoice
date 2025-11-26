@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Bell, HelpCircle } from "lucide-react";
 import HelpTrigger from "@/components/help/help-trigger";
 import BusinessTutorial from "@/components/tutorial/business-tutorial";
+import Breadcrumb from "@/components/breadcrumb";
 
 interface HeaderProps {
   title: string;
@@ -16,6 +17,7 @@ export default function Header({ title, description }: HeaderProps) {
   return (
     <>
       <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+        <Breadcrumb />
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
